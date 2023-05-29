@@ -1,5 +1,5 @@
 theme = "awesome-identity"
-baseURL = "yoavalon.github.io"
+baseURL = "/"
 title = "Awesome Identity for Hugo"
 
 
