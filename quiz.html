@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Quiz Trainer</title>
+  <style>
+    /* Light Theme Variables */
+    :root { 
+      --bg: #f1f5f9; 
+      --panel: #ffffff; 
+      --text: #0f172a; 
+      --muted: #64748b; 
+      --accent: #3b82f6; 
+      --success: #10b981; 
+      --danger: #ef4444; 
+      --border: #cbd5e1; 
+    }
+    
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 24px; }
+    
+    .topbar { width: 100%; max-width: 760px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .stats { display: flex; align-items: center; gap: 16px; font-weight: 600; font-size: 16px; }
+    .pct-badge { background: var(--accent); padding: 4px 10px; border-radius: 6px; color: white; }
+    
+    .quiz-card { width: 100%; max-width: 760px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 28px; display: flex; flex-direction: column; gap: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+    .cat-tag { align-self: flex-start; background: #e2e8f0; color: var(--text); font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 4px; text-transform: uppercase; }
+    
+    .question-text { direction: rtl; text-align: right; font-size: 22px; font-weight: 600; line-height: 1.5; margin: 0; }
+    .q-image { max-width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border); align-self: center; display: none; }
+    
+    .options-grid { display: flex; flex-direction: column; gap: 10px; }
+    .opt-btn { direction: rtl; text-align: right; background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 14px 18px; border-radius: 8px; font-size: 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: all 0.15s; font-weight: 500; }
+    .opt-btn:hover:not(:disabled) { border-color: var(--accent); background: #e2e8f0; }
+    
+    /* Adjusted highlight colors for light theme visibility */
+    .opt-btn.correct { background: #d1fae5; border-color: var(--success); color: #065f46; font-weight: 700; }
+    .opt-btn.wrong { background: #fee2e2; border-color: var(--danger); color: #991b1b; font-weight: 700; }
+    .opt-key { font-size: 12px; color: var(--muted); background: #e2e8f0; padding: 2px 8px; border-radius: 4px; direction: ltr; font-weight: 600; }
+    
+    .explanation-box { direction: ltr; text-align: left; background: var(--bg); border-left: 4px solid var(--accent); padding: 16px; border-radius: 4px; font-size: 15px; line-height: 1.5; display: none; }
+    
+    .controls { display: flex; justify-content: flex-end; }
+    button.action-btn { background: var(--accent); color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px; }
+    button.secondary { background: #e2e8f0; color: var(--text); border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    button.secondary:hover { background: #cbd5e1; }
+    select { background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px; font-weight: 500; }
+  </style>
+</head>
+<body>
+
+  <header class="topbar">
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button class="secondary" onclick="document.getElementById('jsonUpload').click()">Load JSON File(s)</button>
+      <input type="file" id="jsonUpload" accept=".json" multiple style="display:none" onchange="loadFiles(event)">
+      <select id="categoryFilter" onchange="onCategoryChange()">
+        <option value="ALL">All Categories</option>
+      </select>
+    </div>
+    <div class="stats">
+      <span id="scoreCounter">0 / 0</span>
+      <span class="pct-badge" id="pctCounter">0.0%</span>
+      <button class="secondary" onclick="resetScore()">Reset Stats</button>
+    </div>
+  </header>
+
+  <main class="quiz-card" id="quizArea">
+    <div style="text-align:center; color: var(--muted); padding: 40px 0;" id="emptyState">
+      No questions loaded. Load a JSON file above or create questions in the Editor first.
+    </div>
+
+    <div id="questionContent" style="display:none; flex-direction:column; gap:20px;">
+      <span class="cat-tag" id="qCategory">Category</span>
+      <p class="question-text" id="qText"></p>
+      <img id="qImage" class="q-image">
+      <div class="options-grid" id="qOptions"></div>
+      <div class="explanation-box" id="qExplanation"></div>
+      <div class="controls">
+        <button class="action-btn" id="nextBtn" style="display:none;" onclick="nextQuestion()">Next Question (Enter / Space) →</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const DB_NAME = 'QuizAppDB';
+    const STORE_NAME = 'quizData';
+    const RECORD_KEY = 'quiz_bank_v1';
+
+    let allQuestions = [];
+    let activePool = [];
+    let currentQ = null;
+    let answered = false;
+    let totalAsked = 0;
+    let totalCorrect = 0;
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function loadFromDB() {
+      try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(STORE_NAME, 'readonly');
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.get(RECORD_KEY);
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => reject(req.error);
+        });
+      } catch (e) {
+        return [];
+      }
+    }
+
+    // async function boot() {
+    //   allQuestions = await loadFromDB();
+    //   initTrainer();
+    // }
+    async function boot() {
+      // 1. Load any custom user edits from the browser's local database
+      let localQuestions = await loadFromDB();
+      let serverQuestions = [];
+
+      // 2. Automatically fetch the master JSON file from GitHub
+      try {
+        const response = await fetch('quiz_bank.json');
+        if (response.ok) {
+          serverQuestions = await response.json();
+        } else {
+          console.warn("Could not find quiz_bank.json on server.");
+        }
+      } catch (e) {
+        console.warn("Fetch failed, running entirely offline.", e);
+      }
+
+      // 3. Merge them (giving priority to local edits)
+      const merged = [...serverQuestions];
+      const existingIds = new Set(merged.map(q => q.id));
+      
+      localQuestions.forEach(q => {
+        if (!existingIds.has(q.id)) {
+          merged.push(q); // Add new local question
+        } else {
+          const idx = merged.findIndex(sq => sq.id === q.id);
+          merged[idx] = q; // Overwrite master with local edit
+        }
+      });
+
+      allQuestions = merged;
+      initTrainer();
+    }
+
+    function initTrainer() {
+      populateCategories();
+      filterPool();
+      if (activePool.length > 0) nextQuestion();
+    }
+
+    function populateCategories() {
+      const select = document.getElementById('categoryFilter');
+      const currentVal = select.value;
+      const cats = [...new Set(allQuestions.map(q => q.category).filter(Boolean))];
+      select.innerHTML = `<option value="ALL">All Categories (${allQuestions.length})</option>` +
+        cats.map(c => `<option value="${c}">${c}</option>`).join('');
+      if ([...select.options].some(o => o.value === currentVal)) select.value = currentVal;
+    }
+
+    function filterPool() {
+      const cat = document.getElementById('categoryFilter').value;
+      activePool = cat === 'ALL' ? [...allQuestions] : allQuestions.filter(q => q.category === cat);
+      document.getElementById('emptyState').style.display = activePool.length === 0 ? 'block' : 'none';
+      document.getElementById('questionContent').style.display = activePool.length === 0 ? 'none' : 'flex';
+    }
+
+    function onCategoryChange() {
+      filterPool();
+      if (activePool.length > 0) nextQuestion();
+    }
+
+    function loadFiles(event) {
+      const files = [...event.target.files];
+      if (!files.length) return;
+      let loaded = [];
+      let processed = 0;
+      files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const jsonText = e.target.result.replace(/^\uFEFF/, '');
+            const parsed = JSON.parse(jsonText);
+            if (Array.isArray(parsed)) loaded.push(...parsed);
+          } catch (_) {}
+          processed++;
+          if (processed === files.length && loaded.length > 0) {
+            allQuestions = loaded;
+            initTrainer();
+          }
+        };
+        reader.readAsText(file, 'UTF-8');
+      });
+      event.target.value = '';
+    }
+
+    function nextQuestion() {
+      if (activePool.length === 0) return;
+      answered = false;
+
+      let candidates = activePool.length > 1 && currentQ
+        ? activePool.filter(q => q.id !== currentQ.id)
+        : activePool;
+      currentQ = candidates[Math.floor(Math.random() * candidates.length)];
+
+      document.getElementById('qCategory').textContent = currentQ.category || 'General';
+      document.getElementById('qText').textContent = currentQ.question;
+
+      const img = document.getElementById('qImage');
+      if (currentQ.image) {
+        img.src = currentQ.image;
+        img.style.display = 'block';
+      } else {
+        img.style.display = 'none';
+      }
+
+      const indexedOptions = currentQ.options.map((text, idx) => ({
+        text,
+        isCorrect: idx === currentQ.correctIndex
+      }));
+      for (let i = indexedOptions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indexedOptions[i], indexedOptions[j]] = [indexedOptions[j], indexedOptions[i]];
+      }
+
+      const optsContainer = document.getElementById('qOptions');
+      optsContainer.innerHTML = '';
+      indexedOptions.forEach((opt, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'opt-btn';
+        btn.dataset.correct = opt.isCorrect;
+        btn.onclick = () => selectAnswer(btn, opt.isCorrect);
+        btn.innerHTML = `<span>${opt.text}</span><span class="opt-key">[${idx + 1}]</span>`;
+        optsContainer.appendChild(btn);
+      });
+
+      document.getElementById('qExplanation').style.display = 'none';
+      document.getElementById('nextBtn').style.display = 'none';
+    }
+
+    function selectAnswer(selectedBtn, isCorrect) {
+      if (answered) return;
+      answered = true;
+      totalAsked++;
+      if (isCorrect) totalCorrect++;
+      updateStatsUI();
+
+      const buttons = [...document.querySelectorAll('#qOptions .opt-btn')];
+      buttons.forEach(btn => {
+        btn.disabled = true;
+        if (btn.dataset.correct === 'true') btn.classList.add('correct');
+      });
+      if (!isCorrect) selectedBtn.classList.add('wrong');
+
+      const expBox = document.getElementById('qExplanation');
+      if (currentQ.explanation) {
+        expBox.innerHTML = `<strong>Explanation:</strong> ${currentQ.explanation}`;
+        expBox.style.display = 'block';
+      }
+      document.getElementById('nextBtn').style.display = 'inline-block';
+    }
+
+    function updateStatsUI() {
+      const pct = totalAsked === 0 ? 0 : ((totalCorrect / totalAsked) * 100).toFixed(1);
+      document.getElementById('scoreCounter').textContent = `${totalCorrect} / ${totalAsked}`;
+      document.getElementById('pctCounter').textContent = `${pct}%`;
+    }
+
+    function resetScore() {
+      totalAsked = 0;
+      totalCorrect = 0;
+      updateStatsUI();
+    }
+
+    window.addEventListener('keydown', e => {
+      if (activePool.length === 0) return;
+      if (!answered && e.key >= '1' && e.key <= '9') {
+        const idx = parseInt(e.key, 10) - 1;
+        const buttons = document.querySelectorAll('#qOptions .opt-btn');
+        if (buttons[idx]) buttons[idx].click();
+      } else if (answered && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        nextQuestion();
+      }
+    });
+
+    // Start App
+    boot();
+  </script>
+</body>
+</html>
