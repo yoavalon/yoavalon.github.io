@@ -128,7 +128,7 @@
 
       // 2. Automatically fetch the master JSON file from GitHub
       try {
-        const response = await fetch('quiz_bank.json');
+        const response = await fetch('quiz_bank_compressed.json');
         if (response.ok) {
           serverQuestions = await response.json();
         } else {
