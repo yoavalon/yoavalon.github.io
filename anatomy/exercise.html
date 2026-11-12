@@ -246,6 +246,48 @@
                 markersLayer.appendChild(inputGroup);
             });
         }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+        // Adjust path if your HTML is in a different directory relative to these files
+        const folderPath = 'anatomy/abdomen/'; 
+        const fileNames = [
+            'aponeurosis.json', 'cutaneous.json', 'hip.json', 'nerves.json', 'veins.json',
+            'back.json', 'endo.json', 'iliac.json', 'outer.json', 'crus.json',
+            'fascias.json', 'inguinal.json', 'sheath.json'
+        ];
+
+        for (const file of fileNames) {
+            try {
+                const response = await fetch(folderPath + file);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.image && data.annotations) {
+                        exercises.push({
+                            name: file.replace('.json', ''),
+                            data: data
+                        });
+                        const option = document.createElement('option');
+                        option.value = exercises.length - 1;
+                        option.textContent = file.replace('.json', '');
+                        exerciseSelector.appendChild(option);
+                    }
+                } else {
+                    console.warn(`Could not find ${file} on server.`);
+                }
+            } catch (err) {
+                console.error("Fetch failed for", file, err);
+            }
+        }
+
+        // Automatically load the first exercise if successful
+        if (exercises.length > 0) {
+            exerciseSelector.classList.remove('hidden');
+            initialMessage.classList.add('hidden');
+            workspace.classList.remove('hidden');
+            loadExercise(0);
+        }
+    });
+
     </script>
 </body>
 </html>
