@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anatomy Quiz</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .marker-pulse {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            width: 16px;
+            height: 16px;
+            background-color: #ef4444; /* red-500 */
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
+            z-index: 20;
+        }
+        .marker-pulse::after {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            border-radius: 50%;
+            border: 2px solid #ef4444;
+            animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+        @keyframes ping {
+            75%, 100% {
+                transform: scale(2);
+                opacity: 0;
+            }
+        }
+        /* Lock image to viewport to avoid excessive scrolling */
+        .img-container {
+            max-height: calc(100vh - 220px); 
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans flex flex-col text-gray-800">
+
+    <!-- Header -->
+    <header class="bg-purple-600 text-white p-4 shadow-md flex justify-between items-center z-10 relative">
+        <h1 class="text-xl font-bold">Anatomy Quiz</h1>
+        <div class="flex gap-2">
+            <label class="bg-white text-purple-600 px-4 py-2 rounded font-semibold hover:bg-gray-100 transition shadow cursor-pointer">
+                Load File(s)
+                <input type="file" id="fileInput" accept=".json" multiple class="hidden">
+            </label>
+            <label class="bg-white text-purple-600 px-4 py-2 rounded font-semibold hover:bg-gray-100 transition shadow cursor-pointer">
+                Load Folder
+                <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
+            </label>
+        </div>
+    </header>
+
+    <main class="flex-grow p-4 md:p-6 flex flex-col items-center overflow-hidden relative w-full">
+        
+        <!-- Setup Screen -->
+        <div id="setupScreen" class="text-center text-gray-500 mt-20">
+            <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+            <p class="text-xl font-semibold">Load file(s) or a folder to start</p>
+            <p class="text-sm mt-2">Select your annotated JSON file(s).</p>
+        </div>
+
+        <!-- Quiz Screen -->
+        <div id="quizScreen" class="hidden w-full max-w-5xl flex flex-col h-full">
+            
+            <!-- Top Stats Bar -->
+            <div class="flex justify-between items-center bg-white p-3 rounded-t-lg border-b border-gray-200 shadow-sm">
+                <div class="text-lg font-bold text-gray-700">Question: <span id="progressText">1 / 20</span></div>
+                <div class="text-xl font-mono font-bold text-red-500 flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span id="timerText">00:30</span>
+                </div>
+                <div class="text-lg font-bold text-gray-700">Score: <span id="scoreText" class="text-purple-600">0</span></div>
+            </div>
+
+            <!-- Image Area -->
+            <div class="relative bg-white flex-grow flex justify-center items-center overflow-auto shadow-md border-x border-gray-200 img-container">
+                <div class="relative inline-block max-w-full max-h-full flex">
+                    <img id="quizImage" class="max-w-full max-h-full object-contain block" alt="Anatomy Image" draggable="false">
+                    <div id="targetMarker" class="marker-pulse hidden"></div>
+                </div>
+            </div>
+
+            <!-- Bottom Control Panel -->
+            <div class="bg-white p-4 rounded-b-lg shadow-md border-t border-gray-200 flex flex-col items-center gap-3">
+                <div id="feedbackBox" class="h-6 font-semibold text-lg transition-colors duration-200"></div>
+                <form id="answerForm" class="flex gap-2 w-full max-w-md">
+                    <input type="text" id="answerInput" autocomplete="off" placeholder="Name this structure..." class="flex-grow px-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-lg">
+                    <button type="submit" id="submitBtn" class="bg-purple-600 text-white px-6 py-2 rounded font-bold hover:bg-purple-700 transition focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2">Submit</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- End Screen -->
+        <div id="endScreen" class="hidden text-center mt-20 bg-white p-10 rounded-xl shadow-xl max-w-md w-full border border-gray-200">
+            <h2 class="text-3xl font-bold mb-2 text-gray-800">Quiz Complete!</h2>
+            <p class="text-gray-500 mb-6">Here is how you did:</p>
+            <div class="text-6xl font-black text-purple-600 mb-8"><span id="finalScoreText">0</span> <span class="text-2xl text-gray-400">/ 20</span></div>
+            <button id="playAgainBtn" class="w-full bg-purple-600 text-white px-6 py-3 rounded-lg font-bold text-lg hover:bg-purple-700 transition shadow-md">
+                Play Again
+            </button>
+        </div>
+
+    </main>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const folderInput = document.getElementById('folderInput');
+        const setupScreen = document.getElementById('setupScreen');
+        const quizScreen = document.getElementById('quizScreen');
+        const endScreen = document.getElementById('endScreen');
+        
+        const progressText = document.getElementById('progressText');
+        const timerText = document.getElementById('timerText');
+        const scoreText = document.getElementById('scoreText');
+        const quizImage = document.getElementById('quizImage');
+        const targetMarker = document.getElementById('targetMarker');
+        
+        const answerForm = document.getElementById('answerForm');
+        const answerInput = document.getElementById('answerInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const feedbackBox = document.getElementById('feedbackBox');
+        
+        const finalScoreText = document.getElementById('finalScoreText');
+        const playAgainBtn = document.getElementById('playAgainBtn');
+
+        let allQuestions = []; // Pool of all available questions
+        let currentQuiz = [];  // Array of 20 selected questions
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let timeLeft = 30;
+        let timerInterval = null;
+        let isReviewing = false; // True when showing the answer after a mistake/timeout
+        const QUESTIONS_PER_QUIZ = 20;
+        const TIME_LIMIT = 30;
+
+        // --- Data Loading ---
+        async function processFiles(files) {
+            if (!files || files.length === 0) return;
+
+            allQuestions = [];
+            const jsonFiles = Array.from(files).filter(f => f.name.endsWith('.json'));
+            
+            if(jsonFiles.length === 0) {
+                alert("No JSON files found in the selection.");
+                return;
+            }
+
+            for (let file of jsonFiles) {
+                try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+                    if (data.image && data.annotations && Array.isArray(data.annotations)) {
+                        data.annotations.forEach(ann => {
+                            // Support exported format or generic x/y/name
+                            const textVal = ann.text || ann.name;
+                            const pxVal = ann.px !== undefined ? ann.px : ann.x;
+                            const pyVal = ann.py !== undefined ? ann.py : ann.y;
+                            
+                            if (textVal && pxVal !== undefined && pyVal !== undefined) {
+                                allQuestions.push({
+                                    image: data.image,
+                                    text: textVal,
+                                    px: pxVal,
+                                    py: pyVal
+                                });
+                            }
+                        });
+                    }
+                } catch (err) {
+                    console.error("Error parsing file", file.name, err);
+                }
+            }
+
+            if (allQuestions.length === 0) {
+                alert("Could not find any valid annotations in the loaded files.");
+                return;
+            }
+
+            startQuiz();
+        }
+
+        fileInput.addEventListener('change', (e) => processFiles(e.target.files));
+        folderInput.addEventListener('change', (e) => processFiles(e.target.files));
+
+        // --- Quiz Flow ---
+        function startQuiz() {
+            // Shuffle pool
+            const shuffled = [...allQuestions].sort(() => 0.5 - Math.random());
+            // Take up to QUESTIONS_PER_QUIZ
+            currentQuiz = shuffled.slice(0, Math.min(QUESTIONS_PER_QUIZ, shuffled.length));
+            
+            currentQuestionIndex = 0;
+            score = 0;
+            
+            setupScreen.classList.add('hidden');
+            endScreen.classList.add('hidden');
+            quizScreen.classList.remove('hidden');
+            
+            scoreText.textContent = score;
+            loadQuestion();
+        }
+
+        function loadQuestion() {
+            if (currentQuestionIndex >= currentQuiz.length) {
+                endQuiz();
+                return;
+            }
+
+            isReviewing = false;
+            const q = currentQuiz[currentQuestionIndex];
+            
+            // Update UI Stats
+            progressText.textContent = `${currentQuestionIndex + 1} / ${currentQuiz.length}`;
+            feedbackBox.textContent = "";
+            feedbackBox.className = "h-6 font-semibold text-lg transition-colors duration-200";
+            
+            answerInput.value = "";
+            answerInput.disabled = false;
+            submitBtn.disabled = false;
+            
+            // Setup Image & Marker
+            quizImage.src = q.image;
+            // Only show marker once image is loaded so proportions are correct
+            quizImage.onload = () => {
+                targetMarker.style.left = `${q.px * 100}%`;
+                targetMarker.style.top = `${q.py * 100}%`;
+                targetMarker.classList.remove('hidden');
+            };
+
+            // Start Timer
+            timeLeft = TIME_LIMIT;
+            updateTimerDisplay();
+            clearInterval(timerInterval);
+            timerInterval = setInterval(timerTick, 1000);
+
+            // Focus input
+            setTimeout(() => answerInput.focus(), 50);
+        }
+
+        function timerTick() {
+            timeLeft--;
+            updateTimerDisplay();
+            
+            if (timeLeft <= 0) {
+                clearInterval(timerInterval);
+                handleWrongAnswer("Time's Up!");
+            }
+        }
+
+        function updateTimerDisplay() {
+            const secs = timeLeft.toString().padStart(2, '0');
+            timerText.textContent = `00:${secs}`;
+            if (timeLeft <= 5) {
+                timerText.classList.remove('text-gray-700');
+                timerText.classList.add('text-red-500', 'animate-pulse');
+            } else {
+                timerText.classList.remove('text-red-500', 'animate-pulse');
+                timerText.classList.add('text-gray-700');
+            }
+        }
+
+        // --- Interaction ---
+        answerForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (isReviewing) return;
+
+            clearInterval(timerInterval);
+            const userAnswer = answerInput.value.trim().toLowerCase();
+            const correctAnswer = currentQuiz[currentQuestionIndex].text.trim().toLowerCase();
+
+            if (userAnswer === correctAnswer) {
+                handleCorrectAnswer();
+            } else {
+                handleWrongAnswer("Incorrect.");
+            }
+        });
+
+        function handleCorrectAnswer() {
+            isReviewing = true;
+            score++;
+            scoreText.textContent = score;
+            
+            answerInput.disabled = true;
+            submitBtn.disabled = true;
+            
+            feedbackBox.textContent = "Correct!";
+            feedbackBox.classList.add('text-green-600');
+
+            // Brief pause before next
+            setTimeout(() => {
+                currentQuestionIndex++;
+                loadQuestion();
+            }, 800);
+        }
+
+        function handleWrongAnswer(reason) {
+            isReviewing = true;
+            answerInput.disabled = true;
+            submitBtn.disabled = true;
+
+            const correctAnswer = currentQuiz[currentQuestionIndex].text;
+            feedbackBox.innerHTML = `<span class="text-red-600">${reason}</span> <span class="text-gray-600 ml-2">Correct answer:</span> <span class="text-purple-700 font-bold underline">${correctAnswer}</span>`;
+
+            // Wait 2 seconds before moving on
+            setTimeout(() => {
+                currentQuestionIndex++;
+                loadQuestion();
+            }, 2000);
+        }
+
+        function endQuiz() {
+            clearInterval(timerInterval);
+            quizScreen.classList.add('hidden');
+            endScreen.classList.remove('hidden');
+            
+            finalScoreText.textContent = score;
+            document.querySelector('#endScreen .text-2xl').textContent = `/ ${currentQuiz.length}`;
+        }
+
+        playAgainBtn.addEventListener('click', () => {
+            startQuiz();
+        });
+
+    </script>
+</body>
+</html>

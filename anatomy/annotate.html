@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anatomy Annotator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Hide scrollbars for cleaner workspace */
+        body { overflow-x: hidden; }
+        
+        .workspace-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through default */
+        }
+        
+        .fixed-dot {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: #3b82f6; /* blue-500 */
+            border: 2px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: auto;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            cursor: grab;
+        }
+
+        .fixed-dot:active {
+            cursor: grabbing;
+        }
+
+        .label-container {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 150px;
+            cursor: grab;
+            user-select: none;
+        }
+
+        .label-container:active {
+            cursor: grabbing;
+        }
+
+        /* Stop propagation on inputs so we can click/type without dragging */
+        .interactive-el {
+            cursor: default;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans flex flex-col text-gray-800">
+
+    <header class="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center z-10 relative">
+        <h1 class="text-xl font-bold">Anatomy Annotator</h1>
+        <div class="flex items-center gap-3">
+            <input type="text" id="exerciseTitle" placeholder="Exercise Title" class="hidden px-3 py-2 text-sm text-black rounded border border-transparent focus:outline-none focus:ring focus:border-blue-300">
+            <button id="downloadBtn" class="hidden bg-white text-blue-600 px-4 py-2 rounded font-semibold hover:bg-gray-100 transition shadow">
+                Export JSON
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-grow p-6 flex flex-col items-center relative overflow-auto">
+        
+        <!-- Drop Zone -->
+        <div id="dropZone" class="w-full max-w-2xl h-64 border-4 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center bg-white text-gray-500 cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition mt-10">
+            <svg class="w-12 h-12 mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+            <p class="text-lg font-semibold">Drag & Drop, Paste, or click here</p>
+            <p class="text-sm">to load an image</p>
+            <input type="file" id="fileInput" accept="image/*" class="hidden">
+        </div>
+
+        <!-- Workspace -->
+        <div id="workspace" class="hidden relative shadow-xl border border-gray-300 bg-white" style="user-select: none;">
+            <!-- Base Image -->
+            <img id="imageElement" class="max-w-none block" style="max-height: 80vh;" alt="Anatomy Image" draggable="false">
+            
+            <!-- SVG Layer for Lines -->
+            <svg id="svgOverlay" class="workspace-layer overflow-visible"></svg>
+            
+            <!-- HTML Layer for Dots and Labels -->
+            <div id="markersLayer" class="workspace-layer pointer-events-none"></div>
+        </div>
+
+    </main>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const workspace = document.getElementById('workspace');
+        const imageElement = document.getElementById('imageElement');
+        const svgOverlay = document.getElementById('svgOverlay');
+        const markersLayer = document.getElementById('markersLayer');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const exerciseTitle = document.getElementById('exerciseTitle');
+
+        let currentImageBase64 = null;
+        let annotations = []; // Array of { id, px, py, lx, ly, text, level }
+        let idCounter = 0;
+        let isDragging = false;
+        let draggedAnnId = null;
+        let draggedType = null; // 'dot' or 'label'
+
+        // --- Loading Image (Drag, Drop, Paste) ---
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-blue-500'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-blue-500'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) loadImage(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) loadImage(e.target.files[0]);
+        });
+        document.addEventListener('paste', (e) => {
+            const items = (e.clipboardData || window.clipboardData).items;
+            for (let item of items) {
+                if (item.type.indexOf('image') !== -1) {
+                    loadImage(item.getAsFile());
+                    e.preventDefault();
+                    break;
+                }
+            }
+        });
+
+        function loadImage(file) {
+            if (!file.type.startsWith('image/')) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentImageBase64 = e.target.result;
+                imageElement.src = currentImageBase64;
+                dropZone.classList.add('hidden');
+                workspace.classList.remove('hidden');
+                downloadBtn.classList.remove('hidden');
+                exerciseTitle.classList.remove('hidden');
+                annotations = [];
+                render();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // --- Creating Annotations ---
+        imageElement.addEventListener('click', (e) => {
+            if (isDragging) return; // Don't create dot if we just finished dragging
+            
+            const rect = imageElement.getBoundingClientRect();
+            const px = (e.clientX - rect.left) / rect.width;
+            const py = (e.clientY - rect.top) / rect.height;
+            
+            // Initial label position (offset slightly to the right and bottom)
+            const lx = Math.min(px + 0.1, 0.9);
+            const ly = Math.min(py + 0.1, 0.9);
+
+            annotations.push({
+                id: idCounter++,
+                px: px, py: py,
+                lx: lx, ly: ly,
+                text: '',
+                level: 1
+            });
+            render();
+        });
+
+        // --- Dragging Logic ---
+        document.addEventListener('mousemove', (e) => {
+            if (draggedAnnId !== null) {
+                isDragging = true;
+                const rect = imageElement.getBoundingClientRect();
+                let newX = (e.clientX - rect.left) / rect.width;
+                let newY = (e.clientY - rect.top) / rect.height;
+                
+                // Constrain within image bounds
+                newX = Math.max(0, Math.min(1, newX));
+                newY = Math.max(0, Math.min(1, newY));
+
+                const ann = annotations.find(a => a.id === draggedAnnId);
+                if (ann) {
+                    if (draggedType === 'label') {
+                        ann.lx = newX;
+                        ann.ly = newY;
+                    } else if (draggedType === 'dot') {
+                        ann.px = newX;
+                        ann.py = newY;
+                    }
+                    updateDOMPositions(ann);
+                }
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (draggedAnnId !== null) {
+                draggedAnnId = null;
+                draggedType = null;
+                // Small timeout so the click event on the workspace doesn't fire immediately
+                setTimeout(() => { isDragging = false; }, 50);
+            }
+        });
+
+        // --- Rendering ---
+        function render() {
+            svgOverlay.innerHTML = '';
+            markersLayer.innerHTML = '';
+
+            annotations.forEach(ann => {
+                // SVG Line
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('id', `line-${ann.id}`);
+                line.setAttribute('stroke', '#4b5563'); // gray-600
+                line.setAttribute('stroke-width', '2');
+                line.setAttribute('stroke-dasharray', '4');
+                svgOverlay.appendChild(line);
+
+                // Fixed Dot
+                const dot = document.createElement('div');
+                dot.className = 'fixed-dot';
+                dot.setAttribute('id', `dot-${ann.id}`);
+                dot.style.left = `${ann.px * 100}%`;
+                dot.style.top = `${ann.py * 100}%`;
+                
+                dot.addEventListener('mousedown', (e) => {
+                    draggedAnnId = ann.id;
+                    draggedType = 'dot';
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+                
+                markersLayer.appendChild(dot);
+
+                // Draggable Label Container
+                const labelContainer = document.createElement('div');
+                labelContainer.className = 'label-container';
+                labelContainer.setAttribute('id', `label-${ann.id}`);
+                
+                // Handle Drag Start
+                labelContainer.addEventListener('mousedown', (e) => {
+                    // Ignore drag if clicking inputs or buttons
+                    if (e.target.classList.contains('interactive-el')) return;
+                    draggedAnnId = ann.id;
+                    draggedType = 'label';
+                    e.preventDefault(); // prevent text selection
+                    e.stopPropagation();
+                });
+
+                // Top Row: Level & Delete
+                const topRow = document.createElement('div');
+                topRow.className = 'flex justify-between items-center w-full';
+
+                const levelBtn = document.createElement('button');
+                levelBtn.className = `interactive-el text-xs px-2 py-1 rounded font-semibold transition ${ann.level === 1 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`;
+                levelBtn.textContent = `Level ${ann.level}`;
+                levelBtn.addEventListener('mousedown', (e) => e.stopPropagation()); // prevent drag
+                levelBtn.addEventListener('click', () => {
+                    ann.level = ann.level === 1 ? 2 : 1;
+                    levelBtn.textContent = `Level ${ann.level}`;
+                    levelBtn.className = `interactive-el text-xs px-2 py-1 rounded font-semibold transition ${ann.level === 1 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`;
+                });
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'interactive-el text-gray-400 hover:text-red-500 transition focus:outline-none';
+                deleteBtn.innerHTML = '<svg class="w-4 h-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
+                deleteBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+                deleteBtn.addEventListener('click', () => {
+                    annotations = annotations.filter(a => a.id !== ann.id);
+                    render();
+                });
+
+                topRow.appendChild(levelBtn);
+                topRow.appendChild(deleteBtn);
+
+                // Text Input
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'interactive-el w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-500';
+                input.placeholder = 'Body part name...';
+                input.value = ann.text;
+                input.addEventListener('mousedown', (e) => e.stopPropagation());
+                input.addEventListener('input', (e) => { ann.text = e.target.value; });
+
+                labelContainer.appendChild(topRow);
+                labelContainer.appendChild(input);
+                markersLayer.appendChild(labelContainer);
+
+                // Apply initial positions
+                updateDOMPositions(ann);
+            });
+        }
+
+        // Fast update for dragging without full DOM rebuild
+        function updateDOMPositions(ann) {
+            const labelEl = document.getElementById(`label-${ann.id}`);
+            const lineEl = document.getElementById(`line-${ann.id}`);
+            const dotEl = document.getElementById(`dot-${ann.id}`);
+            
+            if (labelEl) {
+                labelEl.style.left = `${ann.lx * 100}%`;
+                labelEl.style.top = `${ann.ly * 100}%`;
+            }
+            if (dotEl) {
+                dotEl.style.left = `${ann.px * 100}%`;
+                dotEl.style.top = `${ann.py * 100}%`;
+            }
+            if (lineEl) {
+                lineEl.setAttribute('x1', `${ann.px * 100}%`);
+                lineEl.setAttribute('y1', `${ann.py * 100}%`);
+                lineEl.setAttribute('x2', `${ann.lx * 100}%`);
+                lineEl.setAttribute('y2', `${ann.ly * 100}%`);
+            }
+        }
+
+        // --- Export ---
+        downloadBtn.addEventListener('click', () => {
+            const data = {
+                image: currentImageBase64,
+                annotations: annotations.map(a => ({
+                    text: a.text,
+                    level: a.level,
+                    px: a.px, py: a.py,
+                    lx: a.lx, ly: a.ly
+                }))
+            };
+
+            let filename = exerciseTitle.value.trim();
+            if (!filename) filename = "anatomy_data";
+            if (!filename.toLowerCase().endsWith('.json')) filename += '.json';
+
+            const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        // Auto-focus logic: when new annotation added, focus its input
+        const observer = new MutationObserver((mutationsList) => {
+            for(let mutation of mutationsList) {
+                if(mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    const addedNode = mutation.addedNodes[mutation.addedNodes.length - 1];
+                    if (addedNode && addedNode.classList && addedNode.classList.contains('label-container')) {
+                        const input = addedNode.querySelector('input');
+                        if(input && !input.value) input.focus();
+                    }
+                }
+            }
+        });
+        observer.observe(markersLayer, { childList: true });
+
+    </script>
+</body>
+</html>

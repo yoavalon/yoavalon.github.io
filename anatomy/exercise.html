@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anatomy Exercise</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .workspace-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .anatomy-dot {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            border: 2px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        }
+        .dot-level-1 { background-color: #22c55e; } /* green-500 */
+        .dot-level-2 { background-color: #ef4444; } /* red-500 */
+
+        .input-container {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            background: rgba(255,255,255,0.95);
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 6px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.2s;
+        }
+
+        .input-container:focus-within {
+            z-index: 10;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .correct-input {
+            background-color: #dcfce3 !important;
+            border-color: #22c55e !important;
+            color: #166534 !important;
+            font-weight: 600;
+        }
+
+        /* Add this new block */
+        .partial-input {
+            background-color: #8abefe !important; 
+            border-color: #b4cef7 !important; 
+            color: #0e5385 !important; 
+        }
+
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans flex flex-col text-gray-800">
+
+    <header class="bg-emerald-600 text-white p-4 shadow-md flex justify-between items-center z-10 relative">
+        <h1 class="text-xl font-bold">Anatomy Exercise</h1>
+        <div class="flex items-center gap-3">
+            <select id="exerciseSelector" class="hidden text-black px-3 py-2 rounded border border-gray-300 focus:outline-none focus:ring min-w-[200px]">
+            </select>
+            <label class="bg-white text-emerald-600 px-4 py-2 rounded font-semibold hover:bg-gray-100 transition shadow cursor-pointer">
+                Load Folder
+                <!-- webkitdirectory allows folder selection -->
+                <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
+            </label>
+        </div>
+    </header>
+
+    <main class="flex-grow p-6 flex flex-col items-center overflow-auto relative">
+        
+        <div id="initialMessage" class="text-center text-gray-500 mt-20">
+            <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+            <p class="text-xl font-semibold">Load a folder containing JSON exercises</p>
+            <p class="text-sm mt-2">Click "Load Folder" in the top right.</p>
+        </div>
+
+        <div id="workspace" class="hidden relative shadow-xl border border-gray-300 bg-white">
+            <img id="imageElement" class="max-w-none block" style="max-height: 80vh;" alt="Exercise Image" draggable="false">
+            <svg id="svgOverlay" class="workspace-layer overflow-visible"></svg>
+            <div id="markersLayer" class="workspace-layer pointer-events-none"></div>
+        </div>
+
+    </main>
+
+    <script>
+        const folderInput = document.getElementById('folderInput');
+        const exerciseSelector = document.getElementById('exerciseSelector');
+        const workspace = document.getElementById('workspace');
+        const imageElement = document.getElementById('imageElement');
+        const svgOverlay = document.getElementById('svgOverlay');
+        const markersLayer = document.getElementById('markersLayer');
+        const initialMessage = document.getElementById('initialMessage');
+
+        let exercises = [];
+
+        folderInput.addEventListener('change', async (e) => {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+
+            exercises = [];
+            exerciseSelector.innerHTML = '';
+            
+            // Filter only JSON files
+            const jsonFiles = Array.from(files).filter(f => f.name.endsWith('.json'));
+            
+            if(jsonFiles.length === 0) {
+                alert("No JSON files found in the selected folder.");
+                return;
+            }
+
+            for (let i = 0; i < jsonFiles.length; i++) {
+                const file = jsonFiles[i];
+                try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+                    if (data.image && data.annotations) {
+                        exercises.push({
+                            name: file.name.replace('.json', ''),
+                            data: data
+                        });
+                        const option = document.createElement('option');
+                        option.value = exercises.length - 1;
+                        option.textContent = file.name.replace('.json', '');
+                        exerciseSelector.appendChild(option);
+                    }
+                } catch (err) {
+                    console.error("Error parsing file", file.name, err);
+                }
+            }
+
+            if (exercises.length > 0) {
+                exerciseSelector.classList.remove('hidden');
+                initialMessage.classList.add('hidden');
+                workspace.classList.remove('hidden');
+                loadExercise(0);
+            }
+        });
+
+        exerciseSelector.addEventListener('change', (e) => {
+            loadExercise(e.target.value);
+        });
+
+        function loadExercise(index) {
+            const exercise = exercises[index];
+            if (!exercise) return;
+
+            imageElement.src = exercise.data.image;
+            svgOverlay.innerHTML = '';
+            markersLayer.innerHTML = '';
+
+            exercise.data.annotations.forEach((ann, i) => {
+                // SVG Line
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', `${ann.px * 100}%`);
+                line.setAttribute('y1', `${ann.py * 100}%`);
+                line.setAttribute('x2', `${ann.lx * 100}%`);
+                line.setAttribute('y2', `${ann.ly * 100}%`);
+                //line.setAttribute('stroke', '#9ca3af'); // gray-400
+                line.setAttribute('stroke', '#22c55e'); // Changed to green-500
+                line.setAttribute('stroke-width', '2');
+                svgOverlay.appendChild(line);
+
+                // Point Dot (Color based on level)
+                const dot = document.createElement('div');
+                dot.className = `anatomy-dot ${ann.level === 1 ? 'dot-level-1' : 'dot-level-2'}`;
+                dot.style.left = `${ann.px * 100}%`;
+                dot.style.top = `${ann.py * 100}%`;
+                markersLayer.appendChild(dot);
+
+                // Input Container at Label Coordinates
+                const inputGroup = document.createElement('div');
+                inputGroup.className = 'input-container';
+                inputGroup.style.left = `${ann.lx * 100}%`;
+                inputGroup.style.top = `${ann.ly * 100}%`;
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'w-28 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-emerald-500 transition-colors shadow-inner';
+                input.placeholder = 'Type...';
+                
+                const revealBtn = document.createElement('button');
+                revealBtn.className = 'px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:outline-none transition';
+                revealBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>';
+                revealBtn.title = "Reveal Answer";
+
+                // const checkAnswer = () => {
+                //     const val = input.value.trim().toLowerCase();
+                //     const correct = ann.text.toLowerCase();
+                //     if (val === correct) {
+                //         input.classList.add('correct-input');
+                //         input.disabled = true;
+                //         revealBtn.style.display = 'none';
+                //     } else {
+                //         input.classList.remove('correct-input');
+                //     }
+                // };
+
+                const checkAnswer = () => {
+                    const val = input.value.trim().toLowerCase();
+                    const correct = ann.text.toLowerCase();
+                    
+                    // Reset classes on every keystroke
+                    input.classList.remove('correct-input', 'partial-input');
+
+                    if (val === correct) {
+                        // Full exact match -> Green
+                        input.classList.add('correct-input');
+                        input.disabled = true;
+                        revealBtn.style.display = 'none';
+                    } else if (val.length > 0) {
+                        // Split inputs into words, ignoring extra spaces
+                        const valWords = val.split(/\s+/);
+                        const correctWords = correct.split(/\s+/);
+                        
+                        // Check if at least one typed word exactly matches a word in the correct answer
+                        const hasOneCorrectWord = valWords.some(word => correctWords.includes(word));
+                        
+                        if (hasOneCorrectWord) {
+                            // Partial match -> Yellow
+                            input.classList.add('partial-input');
+                        }
+                    }
+                };
+
+                input.addEventListener('input', checkAnswer);
+
+                revealBtn.addEventListener('click', () => {
+                    input.value = ann.text;
+                    checkAnswer(); // Trigger the green highlight
+                });
+
+                inputGroup.appendChild(input);
+                inputGroup.appendChild(revealBtn);
+                markersLayer.appendChild(inputGroup);
+            });
+        }
+    </script>
+</body>
+</html>
